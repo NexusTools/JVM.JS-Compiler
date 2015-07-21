@@ -20,7 +20,6 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileFilter;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -131,6 +130,7 @@ public class ClassCompiler {
     public final Config config;
     public final String[] BUILT_IN;
     public List<String> processed = new ArrayList();
+    public final List<File> runtimeFiles = new ArrayList();
     public final List<String> natives = new ArrayList();
     public final Map<String, File> classpathContents;
     private ProgressListener progressListener;
@@ -241,9 +241,26 @@ public class ClassCompiler {
                 throw new CompileError("Error while copying `" + copy + "`", ex);
             }
             
-            if(!copied.contains(copy.getKey()))
+            if(!copied.contains(copy.getKey()) && copy.getKey().endsWith(".js"))
                 copied.add(copy.getKey());
             complete ++;
+        }
+        
+        if(!runtimeFiles.isEmpty()) {
+            File libjvmruntimes = new File(outputFolder + "/jvm.js/runtime");
+            if(!libjvmruntimes.isDirectory() && !libjvmruntimes.mkdirs())
+                throw new CompileError("Cannot create directory `" + libjvmruntimes.getAbsolutePath() + "`");
+            
+            int i=0;
+            for(File runtime : runtimeFiles) {
+                try {
+                    copy(new FileInputStream(runtime), new FileOutputStream(new File(libjvmruntimes, "script" + i + ".js")));
+                } catch (IOException ex) {
+                    throw new CompileError("Error while copying `" + runtime + "`", ex);
+                }
+                copied.add("runtime/script" + i + ".js");
+                i++;
+            }
         }
         
         return Collections.unmodifiableList(copied);
@@ -337,11 +354,21 @@ public class ClassCompiler {
         if(!prefix.isEmpty())
             prefix += '/';
         for(File child : directory.listFiles()) {
-            String childPath = prefix + child.getName();
+            if(child.isHidden() || child.getName().endsWith("~"))
+                continue;
             
-            if(child.isDirectory())
+            String childPath = prefix + child.getName();
+            if(childPath.equals("runtime.js")) {
+                runtimeFiles.add(child);
+                continue;
+            }
+            
+            if(child.isDirectory()) {
+                if(child.getName().equals(".git"))
+                    continue;
+                
                 scan(child, childPath, contents);
-            else if(!contents.containsKey(childPath))
+            } else if(!contents.containsKey(childPath))
                 contents.put(childPath, child);
         }
     }
