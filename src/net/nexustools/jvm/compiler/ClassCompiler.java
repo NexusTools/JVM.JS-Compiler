@@ -34,8 +34,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -131,6 +129,7 @@ public class ClassCompiler {
     public final String[] BUILT_IN;
     public List<String> processed = new ArrayList();
     public final List<File> runtimeFiles = new ArrayList();
+    public final Map<String, List<String>> referenceMap = new HashMap();
     public final List<String> natives = new ArrayList();
     public final Map<String, File> classpathContents;
     private ProgressListener progressListener;
@@ -547,7 +546,6 @@ public class ClassCompiler {
                 bw.append("null");
             bw.append(", [\n");
             
-            final int classAccess = reader.getAccess();
             final List<String> fields = new ArrayList();
             final List<String> methods = new ArrayList();
             System.out.println("\tVisiting class " + classname);
@@ -1284,6 +1282,8 @@ public class ClassCompiler {
         System.out.println("\tProcessing references: " + references);
         for(String ref : references)
             compile(ref);
+        
+        referenceMap.put(runtimeClassname, references);
     }
     
     private static String repeatArray(int arraydepth) {
