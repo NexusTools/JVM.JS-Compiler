@@ -181,6 +181,35 @@ public class GUI extends javax.swing.JFrame {
         config.proguard = chkProguard.isSelected();
         return config;
     }
+    
+    public void loadConfig(File configFile) {
+        try {
+            Config config = Config.load(configFile);
+
+            txtRuntimeJava.setText(config.runtimeDirectoryJava);
+            txtRuntimeJS.setText(config.runtimeDirectoryJS);
+            txtProject.setText(config.projectDirectory);
+            txtOutput.setText(config.outputDirectory);
+            txtMainClass.setText(config.mainClass);
+
+            DefaultListModel model = (DefaultListModel)lstClasses.getModel();
+            model.clear();
+
+            for(int i=0; i<config.additionalClassDirectories.length; i++)
+                model.add(i, config.additionalClassDirectories[i]);
+
+
+            model = (DefaultListModel)lstForceCompile.getModel();
+            model.clear();
+
+            for(int i=0; i<config.additionalClasses.length; i++)
+                model.add(i, config.additionalClasses[i]);
+
+            chkProguard.setSelected(config.proguard);
+        } catch (FileNotFoundException ex) {
+            JOptionPane.showMessageDialog(this, ex.getMessage(), "Error occured", JOptionPane.ERROR_MESSAGE);
+        }
+    }
 
     /**
      * This method is called from within the constructor to initialize the form.
@@ -479,32 +508,7 @@ public class GUI extends javax.swing.JFrame {
             chooser.setFileFilter(fileFilter);
             
             if(chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-                try {
-                    Config config = Config.load(chooser.getSelectedFile());
-                    
-                    txtRuntimeJava.setText(config.runtimeDirectoryJava);
-                    txtRuntimeJS.setText(config.runtimeDirectoryJS);
-                    txtProject.setText(config.projectDirectory);
-                    txtOutput.setText(config.outputDirectory);
-                    txtMainClass.setText(config.mainClass);
-                    
-                    DefaultListModel model = (DefaultListModel)lstClasses.getModel();
-                    model.clear();
-                    
-                    for(int i=0; i<config.additionalClassDirectories.length; i++)
-                        model.add(i, config.additionalClassDirectories[i]);
-                    
-                    
-                    model = (DefaultListModel)lstForceCompile.getModel();
-                    model.clear();
-                    
-                    for(int i=0; i<config.additionalClasses.length; i++)
-                        model.add(i, config.additionalClasses[i]);
-                    
-                    chkProguard.setSelected(config.proguard);
-                } catch (FileNotFoundException ex) {
-                    JOptionPane.showMessageDialog(this, ex.getMessage(), "Error occured", JOptionPane.ERROR_MESSAGE);
-                }
+                loadConfig(chooser.getSelectedFile());
             }
             
     }//GEN-LAST:event_btnImportActionPerformed
@@ -618,7 +622,7 @@ public class GUI extends javax.swing.JFrame {
     /**
      * @param args the command line arguments
      */
-    public static void main(String args[]) {
+    public static void main(final String args[]) {
         try {
             GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
             if(ge.isHeadlessInstance())
@@ -646,7 +650,10 @@ public class GUI extends javax.swing.JFrame {
             java.awt.EventQueue.invokeLater(new Runnable() {
                 @Override
                 public void run() {
-                    new GUI().setVisible(true);
+                    GUI gui = new GUI();
+                    if(args.length > 0)
+                        gui.loadConfig(new File(args[args.length-1]));
+                    gui.setVisible(true);
                 }
             });
         } catch(AWTError | AWTException ex) {

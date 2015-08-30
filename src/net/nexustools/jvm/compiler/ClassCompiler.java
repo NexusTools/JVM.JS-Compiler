@@ -130,6 +130,7 @@ public class ClassCompiler {
     public List<String> processed = new ArrayList();
     public final List<File> runtimeFiles = new ArrayList();
     public final Map<String, List<String>> referenceMap = new HashMap();
+    public final List<String> compiled = new ArrayList();
     public final List<String> natives = new ArrayList();
     public final Map<String, File> classpathContents;
     private ProgressListener progressListener;
@@ -246,18 +247,18 @@ public class ClassCompiler {
         }
         
         if(!runtimeFiles.isEmpty()) {
-            File libjvmruntimes = new File(outputFolder + "/jvm.js/runtime");
+            File libjvmruntimes = new File(outputFolder + "/runtime");
             if(!libjvmruntimes.isDirectory() && !libjvmruntimes.mkdirs())
                 throw new CompileError("Cannot create directory `" + libjvmruntimes.getAbsolutePath() + "`");
             
             int i=0;
             for(File runtime : runtimeFiles) {
                 try {
-                    copy(new FileInputStream(runtime), new FileOutputStream(new File(libjvmruntimes, "script" + i + ".js")));
+                    copy(new FileInputStream(runtime), new FileOutputStream(new File(libjvmruntimes, "boot" + i + ".js")));
                 } catch (IOException ex) {
                     throw new CompileError("Error while copying `" + runtime + "`", ex);
                 }
-                copied.add("runtime/script" + i + ".js");
+                copied.add("../runtime/boot" + i + ".js");
                 i++;
             }
         }
@@ -275,16 +276,24 @@ public class ClassCompiler {
         
         indexHtml.write("\n\n");
         
+        indexHtml.write("  <!-- START LIBS -->\n");
         for(String lib : copiedLibraries) {
-            indexHtml.write("  <script src=\"jvm.js/");
-            indexHtml.write(lib);
+            indexHtml.write("    <script src=\"");
+            if(lib.startsWith("../"))
+                indexHtml.write(lib.substring(3));
+            else {
+                indexHtml.write("jvm.js/");
+                indexHtml.write(lib);
+            }
             indexHtml.write("\"></script>\n");
         }
+        indexHtml.write("  <!-- END LIBS -->\n");
         
         indexHtml.write("  <script>\n    var jvm = new JVM();\n    jvm.makeCurrent();\n  </script>\n");
         
+        indexHtml.write("  <!-- START CLASSES -->\n");
         List<String> known = new ArrayList();
-        for(String ref : processed) {
+        for(String ref : compiled) {
             boolean builtin = false;
             for(String build : BUILT_IN)
                 if(ref.equals(build)) {
@@ -294,24 +303,29 @@ public class ClassCompiler {
             if(builtin)
                 continue;
             
-            ref = convertRuntime(ref);
+            //ref = convertRuntime(ref);
             if(known.contains(ref))
                 continue;
             known.add(ref);
             
-            indexHtml.write("  <script src=\"");
-            indexHtml.write(ref + ".js");
-            indexHtml.write("\"></script>\n");
-        }
-        for(String ref : natives) {
-            ref = convertRuntime(ref);
-            if(known.contains(ref))
-                continue;
-            known.add(ref);
-            
-            indexHtml.write("  <script src=\"");
+            indexHtml.write("    <script src=\"");
             indexHtml.write(ref);
             indexHtml.write("\"></script>\n");
+        }
+        indexHtml.write("  <!-- END CLASSES -->\n");
+        if(!natives.isEmpty()) {
+            indexHtml.write("  <!-- START JNI -->\n");
+            for(String ref : natives) {
+                //ref = convertRuntime(ref);
+                if(known.contains(ref))
+                    continue;
+                known.add(ref);
+
+                indexHtml.write("    <script src=\"");
+                indexHtml.write(ref);
+                indexHtml.write("\"></script>\n");
+            }
+            indexHtml.write("  <!-- END JNI -->\n");
         }
         
         if(config.mainClass != null && !config.mainClass.isEmpty()) {
@@ -437,6 +451,19 @@ public class ClassCompiler {
         return found != null ? found : invalidFile;
     }
     
+    public File resolveOutput(File original, String outputPath) {
+        int classpathIndex = 0;
+        for(File path : classpath) {
+            if(original.getPath().startsWith(path.getPath()))
+                break;
+            classpathIndex ++;
+        }
+        
+        File resolved = new File(outputFolder, "classpath" + classpathIndex + "/" + outputPath);
+        System.out.println("Resolving output: " + outputPath + " to " + resolved);
+        return resolved;
+    }
+    
     public void compile(String rawClassname) throws IOException {
         if(processed.contains(rawClassname))
             return;
@@ -477,13 +504,19 @@ public class ClassCompiler {
             throw new RuntimeException(ex);
         }
         
-        try {
-            final String nativePath = runtimeClassname + ".native.js";
-            copy(new FileInputStream(resolve(classname + ".native.js")), new FileOutputStream(new File(outputFolder, nativePath)));
-            natives.add(nativePath);
-        } catch(Throwable t) {}
-        File output = new File(outputFolder, runtimeClassname + ".js");
-        output.getParentFile().mkdirs();
+        int offset = outputFolder.getPath().length()+1;
+        File output = resolveOutput(findFile, runtimeClassname + ".js");
+        File parentFile = output.getParentFile();
+        if(!parentFile.isDirectory() && !parentFile.mkdirs())
+            throw new RuntimeException("Cannot create directory: " + parentFile);
+        
+        File nativeFile = resolve(classname + ".native.js");
+        if(nativeFile.exists()) {
+            File outputResolvedPath = new File(parentFile, nativeFile.getName());
+            copy(new FileInputStream(nativeFile), new FileOutputStream(outputResolvedPath));
+            natives.add(outputResolvedPath.getPath().substring(offset));
+        }
+        compiled.add(output.getPath().substring(offset));
         
         final List<String> references = new ArrayList();
         final Referencer referencer = new Referencer() {
@@ -633,7 +666,7 @@ public class ClassCompiler {
 
                         bw.append("\t\t\t\t\t\"signature\": {\n");
                         bw.append("\t\t\t\t\t\t\"raw\": \"");
-                        bw.append(desc);
+                        bw.append(convertRuntime(desc));
                         bw.append("\",\n");
 
                         bw.append("\t\t\t\t\t\t\"return\": ");
