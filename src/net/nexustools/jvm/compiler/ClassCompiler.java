@@ -20,6 +20,7 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileFilter;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -34,6 +35,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -132,7 +135,8 @@ public class ClassCompiler {
     public final Map<String, List<String>> referenceMap = new HashMap();
     public final List<String> compiled = new ArrayList();
     public final List<String> natives = new ArrayList();
-    public final Map<String, File> classpathContents;
+    private List<String> extraClasses = new ArrayList();
+    public final Map<String, File> classpathContents = new HashMap();
     private ProgressListener progressListener;
     public final File outputFolder;
     public final File[] classpath;
@@ -159,11 +163,9 @@ public class ClassCompiler {
         for(int i=0; i<config.additionalClassDirectories.length; i++)
             classpath[i+2] = new File(config.additionalClassDirectories[i]);
         
-        Map<String, File> contents = new HashMap();
         progressListener.onMessage("Scanning classpath contents");
         for(File path : classpath)
-            scan(path, "", contents);
-        classpathContents = Collections.unmodifiableMap(contents);
+            scan(path, "");
     }
     
     public void createOutputDirectory() {
@@ -191,7 +193,7 @@ public class ClassCompiler {
         }
         
         progressListener.onMessage("Beginning compile...");
-        int total = classesToCompile.size(), complete = 0;
+        int total = classesToCompile.size() + extraClasses.size(), complete = 0;
         
         for(String compile : classesToCompile) {
             progressListener.onProgress((float)complete / (float)total);
@@ -203,6 +205,17 @@ public class ClassCompiler {
             }
             complete ++;
         }
+        for(String compile : extraClasses) {
+            progressListener.onProgress((float)complete / (float)total);
+            progressListener.onMessage(compile);
+            try {
+                compile(compile);
+            } catch (IOException ex) {
+                throw new CompileError("Error compiling `" + compile + "`", ex);
+            }
+            complete ++;
+        }
+        
     }
 
     public List<String> copyLibraries() {
@@ -218,8 +231,17 @@ public class ClassCompiler {
         
         progressListener.onMessage("Scanning libraries to copy");
         Map<String, File> filesToCopy = new HashMap();
-        scan(new File(config.runtimeDirectoryJS), "", filesToCopy);
+        for(String f : copied)
+            filesToCopy.put(f, new File(config.runtimeDirectoryJS, f));
         
+        for(File child : new File(config.runtimeDirectoryJS, "classes").listFiles()) {
+            String filename = child.getName();
+            String childRef = filename.substring(0, filename.length()-3).replace("_", "/");
+            System.out.println("Checking if " + childRef + " was referenced");
+            if(filename.endsWith(".js") && processed.contains(childRef))
+                filesToCopy.put("../builtin/" + filename, child);
+        }
+            
         progressListener.onMessage("Copying libraries");
         int total = filesToCopy.size(), complete = 0;
         System.out.println("Copying: " + filesToCopy);
@@ -363,7 +385,8 @@ public class ClassCompiler {
         
     }
     
-    private void scan(File directory, String prefix, Map<String, File> contents) {
+    public static final Pattern SERVICE_PATTERN = Pattern.compile("^META\\-INF/services/(.+)$");
+    private void scan(File directory, String prefix) {
         if(!prefix.isEmpty())
             prefix += '/';
         for(File child : directory.listFiles()) {
@@ -371,8 +394,31 @@ public class ClassCompiler {
                 continue;
             
             String childPath = prefix + child.getName();
-            if(childPath.equals("runtime.js")) {
+            if(childPath.equals("META-INF/runtime.js") ||
+                    childPath.equals("runtime.js")) {
                 runtimeFiles.add(child);
+                continue;
+            }
+            
+            Matcher matcher = SERVICE_PATTERN.matcher(childPath);
+            if(matcher.matches()) {
+                System.out.println("Matches Service Pattern: " + childPath);
+                StringBuilder content = new StringBuilder();
+                byte[] buffer = new byte[4096];
+                try {
+                    int read;
+                    InputStream in = new FileInputStream(child);
+                    while((read = in.read(buffer)) > 0)
+                        content.append(new String(buffer, 0, read));
+                    
+                    String implClass = content.toString().trim();
+                    int dash = implClass.indexOf('#');
+                    if(dash > -1)
+                        implClass = implClass.substring(0, dash).trim();
+                    extraClasses.add(implClass.replace(".", "/"));
+                } catch (IOException ex) {
+                    throw new RuntimeException("Failed to process service", ex);
+                }
                 continue;
             }
             
@@ -380,9 +426,9 @@ public class ClassCompiler {
                 if(child.getName().equals(".git"))
                     continue;
                 
-                scan(child, childPath, contents);
-            } else if(!contents.containsKey(childPath))
-                contents.put(childPath, child);
+                scan(child, childPath);
+            } else if(!classpathContents.containsKey(childPath))
+                classpathContents.put(childPath, child);
         }
     }
     
