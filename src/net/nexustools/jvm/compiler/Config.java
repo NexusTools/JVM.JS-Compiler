@@ -33,6 +33,7 @@ public class Config {
         return new Gson().fromJson(new FileReader(file), Config.class);
     }
     
+    public String scriptType = "text/javascript";
     public String runtimeDirectoryJava;
     public String runtimeDirectoryJS;
     public String projectDirectory;

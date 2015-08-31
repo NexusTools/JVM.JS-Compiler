@@ -16,12 +16,13 @@
  */
 package net.nexustools.jvm.compiler;
 
+import com.google.gson.Gson;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileFilter;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -54,12 +55,26 @@ import org.objectweb.asm.optimizer.ClassOptimizer;
  *
  * @author kate
  */
-public class ClassCompiler {
+public class Compiler {
     public static final Pattern methodSignature = Pattern.compile("^\\(([^\\)]+)?\\)(.+)$");
     public static final Pattern classSignature = Pattern.compile("L([^;]+);");
     public static final Pattern javaClass = Pattern.compile("^javax?/");
     public static final File invalidFile = new File("$$unknown!$$");
     public static final String astrixQuote = Pattern.quote("*");
+    public static final String[] requiredBuiltIns = new String[]{
+        "java/lang/Throwable",
+        "java/lang/Exception",
+        "java/lang/VirtualMachineError",
+        "java/lang/UnsatisfiedLinkError",
+        "java/lang/ClassNotFoundException",
+        "java/lang/IllegalArgumentException",
+        "java/lang/UnsupportedOperationException",
+        "java/lang/NullPointerException",
+        "java/lang/RuntimeException",
+        "java/lang/Iterator",
+        "java/lang/Number",
+        "java/lang/Class"
+    };
     
     private static final Map<Integer, String> opcodeMap = new HashMap();
     private static final Map<String, Integer> accessModes = new HashMap();
@@ -96,7 +111,9 @@ public class ClassCompiler {
         public CompileError(String message) {
             super(message);
         }
-
+        public CompileError(Throwable cause) {
+            super(cause.toString(), cause);
+        }
         public CompileError(String message, Throwable cause) {
             super(message, cause);
         }
@@ -130,17 +147,19 @@ public class ClassCompiler {
     
     public final Config config;
     public final String[] BUILT_IN;
-    public List<String> processed = new ArrayList();
+    public final List<String> processed = new ArrayList();
     public final List<File> runtimeFiles = new ArrayList();
     public final Map<String, List<String>> referenceMap = new HashMap();
     public final List<String> compiled = new ArrayList();
     public final List<String> natives = new ArrayList();
-    private List<String> extraClasses = new ArrayList();
+    public final List<String> extraClasses = new ArrayList();
+    public final List<String> usedbuiltins = new ArrayList();
+    public final Map<String, List<String>> serviceMap = new HashMap();
     public final Map<String, File> classpathContents = new HashMap();
     private ProgressListener progressListener;
     public final File outputFolder;
     public final File[] classpath;
-    public ClassCompiler(Config config, ProgressListener listener) {
+    public Compiler(Config config, ProgressListener listener) {
         this.config = config;
         setProgressListener(listener);
         
@@ -220,39 +239,57 @@ public class ClassCompiler {
 
     public List<String> copyLibraries() {
         List<String> copied = new ArrayList();
-        copied.add("jvm.js");
-        copied.add("common.js");
-        copied.add("settings.js");
-        copied.add("types.js");
-        copied.add("flags.js");
-        copied.add("opcodes.js");
-        copied.add("classloader.js");
-        copied.add("optimizer.js");
+        copied.add("jvm/jvm.js");
+        copied.add("jvm/common.js");
+        copied.add("jvm/settings.js");
+        copied.add("jvm/types.js");
+        copied.add("jvm/flags.js");
+        copied.add("jvm/opcodes.js");
+        copied.add("jvm/classloader.js");
+        copied.add("jvm/optimizer.js");
         
         progressListener.onMessage("Scanning libraries to copy");
         Map<String, File> filesToCopy = new HashMap();
         for(String f : copied)
-            filesToCopy.put(f, new File(config.runtimeDirectoryJS, f));
+            filesToCopy.put(f, new File(config.runtimeDirectoryJS, f.substring(4)));
         
-        for(File child : new File(config.runtimeDirectoryJS, "classes").listFiles()) {
-            String filename = child.getName();
-            String childRef = filename.substring(0, filename.length()-3).replace("_", "/");
-            System.out.println("Checking if " + childRef + " was referenced");
-            if(filename.endsWith(".js") && processed.contains(childRef))
-                filesToCopy.put("../builtin/" + filename, child);
+        if(!serviceMap.isEmpty()) {
+            File runtimeDir = new File(config.outputDirectory, "runtime");
+            if(!runtimeDir.isDirectory() && !runtimeDir.mkdirs())
+                throw new CompileError("Unable to create runtime directory");
+            try (FileWriter writer = new FileWriter(new File(runtimeDir, "services.js"))) {
+                writer.append("(function(JVM) {\n");
+                writer.append("\tObject.defineProperty(JVM, \"ServiceMap\", {\n");
+                writer.append("\t\tvalue: ");
+                writer.append(new Gson().toJson(serviceMap));
+                writer.append("\n\t});\n");
+                writer.append("})($currentJVM);");
+            } catch (IOException ex) {
+                throw new CompileError(ex);
+            }
+            copied.add("runtime/services.js");
         }
-            
+        
+        for(String builtin : requiredBuiltIns) {
+            if(!usedbuiltins.contains(builtin))
+                usedbuiltins.add(builtin);
+        }
+        
+        System.out.println("Processing used builtins: " + usedbuiltins);
+        for(String builtin : usedbuiltins) {
+            filesToCopy.put("builtin/" + builtin + ".js", new File(new File(config.runtimeDirectoryJS), "classes/" + builtin.replace("/", "_") + ".js"));
+        }
+        
         progressListener.onMessage("Copying libraries");
         int total = filesToCopy.size(), complete = 0;
         System.out.println("Copying: " + filesToCopy);
         
         System.out.println("Copying " + total + " files");
         
-        File libjvm = new File(outputFolder + "/jvm.js");
         for(Entry<String, File> copy : filesToCopy.entrySet()) {
             progressListener.onProgress((float)complete / (float)total);
             
-            File outFile = new File(libjvm, copy.getKey());
+            File outFile = new File(outputFolder, copy.getKey());
             File parentDir = outFile.getParentFile();
             if(!parentDir.isDirectory() && !parentDir.mkdirs())
                 throw new CompileError("Cannot create directory `" + parentDir.getAbsolutePath() + "`");
@@ -280,7 +317,7 @@ public class ClassCompiler {
                 } catch (IOException ex) {
                     throw new CompileError("Error while copying `" + runtime + "`", ex);
                 }
-                copied.add("../runtime/boot" + i + ".js");
+                copied.add("runtime/boot" + i + ".js");
                 i++;
             }
         }
@@ -298,20 +335,39 @@ public class ClassCompiler {
         
         indexHtml.write("\n\n");
         
+        indexHtml.write("  <script type=\"");
+        indexHtml.write(config.scriptType);
+        indexHtml.write("\">\n    window.$jvmErrors = [];\n    window.onerror = function(msg, url, line) {\n      window.$jvmErrors.push([msg, url, line]);\n    }\n  </script>\n");
+        
+        indexHtml.write("  <!-- START JVM LIBS -->\n");
+        for(String lib : copiedLibraries) {
+            if(!lib.startsWith("jvm/"))
+                continue;
+            
+            indexHtml.write("    <script type=\"");
+            indexHtml.write(config.scriptType);
+            indexHtml.write("\" src=\"");
+            indexHtml.write(lib);
+            indexHtml.write("\"></script>\n");
+        }
+        indexHtml.write("  <!-- END JVM LIBS -->\n");
+        
+        indexHtml.write("  <script type=\"");
+        indexHtml.write(config.scriptType);
+        indexHtml.write("\">\n    var jvm = new JVM();\n    jvm.makeCurrent();\n  </script>\n");
+        
         indexHtml.write("  <!-- START LIBS -->\n");
         for(String lib : copiedLibraries) {
-            indexHtml.write("    <script src=\"");
-            if(lib.startsWith("../"))
-                indexHtml.write(lib.substring(3));
-            else {
-                indexHtml.write("jvm.js/");
-                indexHtml.write(lib);
-            }
+            if(lib.startsWith("jvm/"))
+                continue;
+            
+            indexHtml.write("    <script type=\"");
+            indexHtml.write(config.scriptType);
+            indexHtml.write("\" src=\"");
+            indexHtml.write(lib);
             indexHtml.write("\"></script>\n");
         }
         indexHtml.write("  <!-- END LIBS -->\n");
-        
-        indexHtml.write("  <script>\n    var jvm = new JVM();\n    jvm.makeCurrent();\n  </script>\n");
         
         indexHtml.write("  <!-- START CLASSES -->\n");
         List<String> known = new ArrayList();
@@ -330,7 +386,9 @@ public class ClassCompiler {
                 continue;
             known.add(ref);
             
-            indexHtml.write("    <script src=\"");
+            indexHtml.write("    <script type=\"");
+            indexHtml.write(config.scriptType);
+            indexHtml.write("\" src=\"");
             indexHtml.write(ref);
             indexHtml.write("\"></script>\n");
         }
@@ -343,7 +401,9 @@ public class ClassCompiler {
                     continue;
                 known.add(ref);
 
-                indexHtml.write("    <script src=\"");
+                indexHtml.write("    <script type=\"");
+                indexHtml.write(config.scriptType);
+                indexHtml.write("\" src=\"");
                 indexHtml.write(ref);
                 indexHtml.write("\"></script>\n");
             }
@@ -351,7 +411,9 @@ public class ClassCompiler {
         }
         
         if(config.mainClass != null && !config.mainClass.isEmpty()) {
-            indexHtml.write("  <script>jvm.main(\"");
+            indexHtml.write("  <script type=\"");
+            indexHtml.write(config.scriptType);
+            indexHtml.write("\">jvm.main(\"");
             indexHtml.write(config.mainClass.replace('.', '/'));
             indexHtml.write("\")</script>\n");
         }
@@ -415,9 +477,22 @@ public class ClassCompiler {
                     int dash = implClass.indexOf('#');
                     if(dash > -1)
                         implClass = implClass.substring(0, dash).trim();
-                    extraClasses.add(implClass.replace(".", "/"));
+                    
+                    String name = child.getName();
+                    List<String> implList = serviceMap.get(name);
+                    if(implList == null) {
+                        serviceMap.put(name, implList = new ArrayList());
+                        if(!extraClasses.contains("java/lang/Iterable"))
+                            extraClasses.add("java/lang/Iterable");
+                        if(!extraClasses.contains("java/lang/Iterator"))
+                            extraClasses.add("java/lang/Iterator");
+                    }
+                    
+                    String implClassPath = implClass.replace(".", "/");
+                    implList.add(implClassPath);
+                    extraClasses.add(implClassPath);
                 } catch (IOException ex) {
-                    throw new RuntimeException("Failed to process service", ex);
+                    throw new CompileError("Failed to process service", ex);
                 }
                 continue;
             }
@@ -479,7 +554,7 @@ public class ClassCompiler {
         }
         
         if(access > 0)
-            throw new RuntimeException("Access remaining, unhandled or unknown access mode. (" + access + ")");
+            throw new CompileError("Access remaining, unhandled or unknown access mode. (" + access + ")");
         
         for(int i=0; i<modes.size(); i++) {
             bw.append("\t\t\t\tJVM.Flags.");
@@ -519,9 +594,11 @@ public class ClassCompiler {
         
         final String classname, runtimeClassname = convertRuntime(rawClassname);
         
-        for(String buildin : BUILT_IN)
-            if(buildin.equals(runtimeClassname))
+        for(String builtin : BUILT_IN)
+            if(builtin.equals(runtimeClassname)) {
+                usedbuiltins.add(builtin);
                 return; // Skip
+            }
         
         if(javaClass.matcher(rawClassname).find())
             classname = "net/nexustools/jvm/runtime/" + rawClassname;
@@ -542,12 +619,12 @@ public class ClassCompiler {
                 
                 reader = new ClassReader(new FileInputStream(findFile));
             } else {
-                throw new RuntimeException("No implementation found: " + classname);
+                throw new CompileError("No implementation found: " + classname);
                 //reader = new ClassReader(rawClassname);
                 //System.err.println("\tUsing system provided class impl");
             }
         } catch (IOException ex) {
-            throw new RuntimeException(ex);
+            throw new CompileError(ex);
         }
         
         int offset = outputFolder.getPath().length()+1;
@@ -991,7 +1068,7 @@ public class ClassCompiler {
                                 case Type.OBJECT:
                                     System.out.println("OBJECT REFERENCE");
                                     String ref = type.getInternalName();
-                                    bw.append("\t\t\t\t\t\"objectReference\": \"");
+                                    bw.append("\t\t\t\t\t\"objectRef\": \"");
                                     converter.convert(ref);
                                     bw.append(ref);
                                     bw.append("\"\n");
