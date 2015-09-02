@@ -33,11 +33,16 @@ public class Config {
         return new Gson().fromJson(new FileReader(file), Config.class);
     }
     
+    public boolean writeIndex = true;
+    public final IndexSection head = new IndexSection();
+    public final IndexSection body = new IndexSection();
     public String scriptType = "text/javascript";
+    
     public String runtimeDirectoryJava;
     public String runtimeDirectoryJS;
     public String projectDirectory;
     public String outputDirectory;
+    public String compilerVersion = "initial";
     public String mainClass;
     
     public String[] additionalClassDirectories;
@@ -49,6 +54,10 @@ public class Config {
         try (FileWriter writer = new FileWriter(file)) {
             new Gson().toJson(this, writer);
         }
-            
+    }
+    
+    public static class IndexSection {
+        public String header;
+        public String footer;
     }
 }

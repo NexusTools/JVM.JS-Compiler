@@ -33,11 +33,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -245,11 +244,12 @@ public class Compiler {
         copied.add("jvm/types.js");
         copied.add("jvm/flags.js");
         copied.add("jvm/opcodes.js");
-        copied.add("jvm/classloader.js");
         copied.add("jvm/optimizer.js");
+        copied.add("jvm/compiler-" + config.compilerVersion.replaceAll("\\s+", "-").toLowerCase() + ".js");
+        copied.add("jvm/classloader.js");
         
         progressListener.onMessage("Scanning libraries to copy");
-        Map<String, File> filesToCopy = new HashMap();
+        Map<String, File> filesToCopy = new LinkedHashMap();
         for(String f : copied)
             filesToCopy.put(f, new File(config.runtimeDirectoryJS, f.substring(4)));
         
@@ -329,10 +329,15 @@ public class Compiler {
         progressListener.onProgress(-1);
         
         BufferedWriter indexHtml = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(new File(outputFolder, "index.html"))));
-        indexHtml.write("<html><head>\n  <title>JVM Test</title>\n</head><body>\n");
+        indexHtml.write("<html><head>");
+        indexHtml.write(config.head.header);
+        indexHtml.write("\n  <title>JVM Test</title>\n");
+        indexHtml.write(config.head.footer);
+        indexHtml.write("</head><body>\n");
         //indexHtml.write("  <canvas id=\"canvas\" width=\"1024\", height=\"768\"></canvas><br />\n" +
         //                "  <button id=\"button\">Click Me!</button>\n");
         
+        indexHtml.write(config.body.header);
         indexHtml.write("\n\n");
         
         indexHtml.write("  <script type=\"");
@@ -417,6 +422,7 @@ public class Compiler {
             indexHtml.write(config.mainClass.replace('.', '/'));
             indexHtml.write("\")</script>\n");
         }
+        indexHtml.write(config.body.footer);
         indexHtml.write("</body></html>");
         indexHtml.flush();
         indexHtml.close();
