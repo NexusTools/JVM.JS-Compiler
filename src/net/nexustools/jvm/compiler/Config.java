@@ -42,7 +42,7 @@ public class Config {
     public String runtimeDirectoryJS;
     public String projectDirectory;
     public String outputDirectory;
-    public String compilerVersion = "initial";
+    public String compilerVersion = "sync";
     public String mainClass;
     
     public String[] additionalClassDirectories;

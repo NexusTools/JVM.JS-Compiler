@@ -471,7 +471,7 @@ public class GUI extends javax.swing.JFrame {
 
         jLabel5.setText("Main Class");
 
-        cmbCompilerVersion.setModel(new javax.swing.DefaultComboBoxModel(new String[] { "Initial", "Testing" }));
+        cmbCompilerVersion.setModel(new javax.swing.DefaultComboBoxModel(new String[] { "Sync", "Async" }));
 
         jLabel6.setText("Compiler Version");
 

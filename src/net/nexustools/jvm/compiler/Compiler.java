@@ -238,6 +238,18 @@ public class Compiler {
 
     public List<String> copyLibraries() {
         List<String> copied = new ArrayList();
+        
+        File libDir = new File(config.runtimeDirectoryJS, "lib");
+        System.out.println("Scanning lib directory" + libDir);
+        for(File file : libDir.listFiles(new FileFilter() {
+                    @Override
+                    public boolean accept(File pathname) {
+                        return pathname.isFile() && (pathname.getName().endsWith(".js") || pathname.getName().endsWith(".map"));
+                    }
+                })) {
+            copied.add("jvm/lib/" + file.getName());
+        }
+        
         copied.add("jvm/jvm.js");
         copied.add("jvm/common.js");
         copied.add("jvm/settings.js");
@@ -1061,9 +1073,9 @@ public class Compiler {
                         bw.append("\t\t\t\t\t\"type\": \"ldc\",\n");
 
                         if(cst instanceof String) {
-                            bw.append("\t\t\t\t\t\"stringValue\": \"");
-                            bw.append((String)cst);
-                            bw.append("\"\n");
+                            bw.append("\t\t\t\t\t\"stringValue\": ");
+                            bw.append(new Gson().toJson((String)cst));
+                            bw.append("\n");
                         } else if(cst instanceof Number) {
                             bw.append("\t\t\t\t\t\"numericValue\": ");
                             bw.append(String.valueOf((Number)cst));
