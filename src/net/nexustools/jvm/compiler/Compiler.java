@@ -70,6 +70,7 @@ public class Compiler {
         "java/lang/UnsupportedOperationException",
         "java/lang/NullPointerException",
         "java/lang/RuntimeException",
+        "java/lang/CharSequence",
         "java/lang/Iterator",
         "java/lang/Number",
         "java/lang/Class"
@@ -1086,10 +1087,9 @@ public class Compiler {
                                 case Type.OBJECT:
                                     System.out.println("OBJECT REFERENCE");
                                     String ref = type.getInternalName();
-                                    bw.append("\t\t\t\t\t\"objectRef\": \"");
-                                    converter.convert(ref);
-                                    bw.append(ref);
-                                    bw.append("\"\n");
+                                    bw.append("\t\t\t\t\t\"objectRef\": ");
+                                    bw.append(converter.convert(ref));
+                                    bw.append("\n");
                                     break;
                                     
                                 default:
